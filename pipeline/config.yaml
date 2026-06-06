@@ -1,0 +1,107 @@
+# =============================================================================
+# Foundation-F1 — Thai 1B foundation model pipeline
+#
+# One config drives the whole pipeline:
+#   00_download_base -> 01_prune_to_1b -> 02_prepare_data -> 03_pretrain -> 04_eval
+#
+# BASE MODEL
+#   google/gemma-4-E2B-it — Gemma 4, E2B variant (MatFormer): ~2.3B effective
+#   params (5.1B with embeddings), 128K context, multimodal (text/image/audio).
+#   We use it here purely as an ARCHITECTURE + TOKENIZER template; for a text
+#   foundation model we derive a dense ~1B text decoder and reuse its tokenizer.
+# =============================================================================
+
+base:
+  # The base model is used as an ARCHITECTURE + TOKENIZER template.
+  model_id: "google/gemma-4-E2B-it"
+  # Where the downloaded base is cached locally.
+  local_dir: "artifacts/base"
+  # Gated models on the Hub require a token (env var HF_TOKEN or `huggingface-cli login`).
+  trust_remote_code: true
+
+prune:
+  # How to obtain the ~1B model from the base architecture:
+  #   reinit     -> build a fresh ~1B config, RANDOM-INITIALISE weights, keep tokenizer.
+  #                 This is "train a model that already (is) without weight" — from scratch.
+  #   structured -> actually slice the base's pretrained weights down to ~1B
+  #                 (drop layers + narrow width) for a warm start. Trains better per FLOP.
+  mode: "reinit"
+
+  # Target parameter budget (total, including embeddings). The script searches a
+  # small architecture grid to land closest to this without going over by >5%.
+  target_params: 1_000_000_000
+
+  # Architecture knobs for the derived 1B model. Leave null to inherit from base.
+  # These are the defaults the search starts from for a ~1B decoder-only LM.
+  arch:
+    hidden_size: 1536
+    intermediate_size: 6144
+    num_hidden_layers: 26
+    num_attention_heads: 12
+    num_key_value_heads: 4        # GQA
+    max_position_embeddings: 8192
+    # vocab_size is ALWAYS inherited from the base tokenizer (do not change).
+    tie_word_embeddings: true     # critical for a small model with a large vocab
+
+  output_dir: "artifacts/model-1b-init"
+
+data:
+  # Hugging Face datasets to stream/download. Each entry: {id, split, text_field}.
+  hf_datasets:
+    - id: "SPAISS6F1/spai-ss6-pythainlp-pretrain-collection"
+      split: "train"
+      text_field: "text"
+    - id: "SPAISS6F1/spai-ss6-llm-1b-thai-corpus"
+      split: "train"
+      text_field: "text"
+  # Local parquet already present in this repo (text/source schema). Globs.
+  local_parquet:
+    - "../data/ThaiLLMRepo_parquet/*.parquet"
+    # - "../data/temp_seapile/seapile/*.parquet"   # uncomment to include SEA-PILE
+
+  text_field: "text"             # default field name across sources
+  sequence_length: 2048          # tokens per packed training example
+  num_proc: 8                    # tokenisation workers
+  seed: 42
+  validation_fraction: 0.001     # held out for perplexity tracking
+  tokenized_dir: "artifacts/tokenized"
+  # Cap for quick smoke tests; null = use everything.
+  max_train_docs: null
+
+train:
+  output_dir: "artifacts/checkpoints"
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 16   # effective batch = bs * grad_accum * num_gpus
+  learning_rate: 3.0e-4
+  min_lr_ratio: 0.1
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0
+  warmup_ratio: 0.01
+  # Set EITHER max_steps (preferred for pretraining) OR num_train_epochs.
+  max_steps: 50000
+  num_train_epochs: null
+  lr_scheduler_type: "cosine_with_min_lr"   # honors min_lr_ratio below
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_steps: 1000
+  save_total_limit: 5
+  eval_steps: 1000
+  dataloader_num_workers: 4
+  seed: 42
+  # Resume from the latest checkpoint in output_dir if one exists.
+  resume: true
+  # Weights & Biases (optional). report_to: "none" to disable.
+  report_to: "none"
+  run_name: "thai-1b-pretrain"
+
+eval:
+  # Quick post-training sanity: perplexity on the val split + a few generations.
+  prompts:
+    - "ประเทศไทยมีเมืองหลวงคือ"
+    - "ปัญญาประดิษฐ์ (AI) คือ"
+    - "กฎหมายแพ่งและพาณิชย์ของไทย"
+  max_new_tokens: 64

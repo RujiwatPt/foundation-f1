@@ -1,0 +1,17 @@
+# Core
+torch>=2.4
+transformers>=4.46
+datasets>=2.20
+accelerate>=0.34
+tokenizers>=0.20
+sentencepiece
+pyyaml
+huggingface_hub>=0.25
+# transformers imports peft transitively; old peft breaks on transformers 5.x
+# (ImportError: cannot import name 'HybridCache'). Keep them compatible.
+peft>=0.18
+
+# Optional but recommended for real training
+# flash-attn            # faster attention (CUDA only; install per your CUDA)
+# deepspeed             # ZeRO sharding for multi-GPU / low-memory
+# wandb                 # set train.report_to: "wandb" in config.yaml

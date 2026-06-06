@@ -1,0 +1,12 @@
+# secrets
+.env
+
+# data (large, not for git)
+data/
+
+# macOS
+.DS_Store
+
+# python
+__pycache__/
+*.pyc
