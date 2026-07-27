@@ -65,7 +65,7 @@ def main():
     src_base = "/Volumes/Extreme SSD/Project/ThaiLLMRepo"
     
     # Local destination path
-    dest_base = "/Users/howlinglight/foundation-f1/data/ThaiLLMRepo_parquet"
+    dest_base = os.path.join(os.path.dirname(__file__), "data", "ThaiLLMRepo_parquet")
     os.makedirs(dest_base, exist_ok=True)
     
     print("=== Starting Direct Conversion of ThaiLLMRepo (from external SSD) to Local Parquet ===")
